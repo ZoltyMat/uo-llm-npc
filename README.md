@@ -1,6 +1,6 @@
 # LLM-driven NPCs for Ultima Online (ServUO)
 
-Drop-in C# scripts that give the NPCs on a [ServUO](https://www.servuo.com/)
+Drop-in C# scripts that give the NPCs on a [ServUO](https://www.servuo.dev/)
 shard a voice, a memory, and a small autonomous life — powered by a local,
 OpenAI-compatible LLM (e.g. [Ollama](https://ollama.com/)) with optional
 vector RAG over [Qdrant](https://qdrant.tech/).
