@@ -1,0 +1,21 @@
+# Runtime config holding real endpoints / keys — never commit.
+Config/LLMNpc.cfg
+*.cfg
+!*.cfg.example
+
+# ServUO build + world state (this repo is integration scripts only).
+Saves/
+Backups/
+Logs/
+*.bin
+*.dll
+*.exe
+*.pdb
+bin/
+obj/
+
+# Editor / OS cruft.
+.vs/
+.idea/
+.DS_Store
+*.swp

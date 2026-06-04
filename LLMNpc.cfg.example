@@ -1,0 +1,103 @@
+# LLMNpc.cfg - configuration for LLM-driven NPC dialog.
+# Copy this to Config/LLMNpc.cfg in your shard, edit, and run
+# [LLMReload in-game to apply without a restart.
+#
+# The server also writes a default copy of this file the first time it
+# boots without one, so you can let it generate the scaffold and edit.
+#
+# Master switch. NPCs only call the model when this is true.
+Enabled=false
+#
+# OpenAI-compatible endpoint. Must include /v1 and no trailing slash.
+# Default: a local Ollama instance (no auth, local, free).
+BaseUrl=http://127.0.0.1:11434/v1
+# Gateway alternative (needs a valid virtual key in ApiKey):
+# BaseUrl=https://your-litellm-gateway.example/v1
+ApiKey=
+Model=qwen3-coder:30b
+#
+# Generation tuning.
+Temperature=0.8
+MaxTokens=120
+TimeoutMs=9000
+#
+# Anti-spam: minimum ms between calls per NPC.
+CooldownMs=2500
+# Conversation turns of memory replayed per (player, npc) pair.
+MaxMemoryTurns=6
+# Tiles within which an NPC hears nearby speech.
+HearRange=4
+# Hard cap on spoken reply length.
+MaxReplyChars=240
+#
+# Accept self-signed TLS (https gateways only).
+InsecureTls=false
+# Restrict to one map by name (e.g. Felucca). Empty = any map.
+AllowedMap=
+#
+# ----- Retrieval-augmented lore (Qdrant) -----
+# When on, replies are grounded with a vector search over a lore
+# collection. Fail-open: any RAG error just drops the lore for that reply.
+RagEnabled=false
+# Qdrant REST base (no trailing slash) and an API key with read access.
+RagUrl=http://127.0.0.1:6333
+RagApiKey=
+RagCollection=uo_lore
+# Embedding endpoint is Ollama's NATIVE api (no /v1).
+RagEmbedUrl=http://127.0.0.1:11434
+RagEmbedModel=nomic-embed-text-v2-moe
+# Snippets to retrieve, and the minimum cosine score to keep one.
+RagTopK=3
+RagMinScore=0.35
+# Per-call timeout (embed, search) in ms.
+RagTimeoutMs=6000
+#
+# ----- Voice-style grounding (exemplar lines) -----
+# When on, replies are seasoned with a few archetype-matched exemplar
+# lines (cadence/wit, setting stripped) from a style collection.
+# Reuses the same Qdrant host + embedding endpoint as RAG above.
+StyleEnabled=false
+StyleCollection=bg3_style
+# Exemplars to retrieve, and the minimum cosine score to keep one.
+# MinScore=0 keeps stylistic flavor even on a loose topical match.
+StyleTopK=4
+StyleMinScore=0.0
+#
+# ----- NPC journal (deeds -> Qdrant npc_journal) -----
+# When on, each completed errand/journey is embedded + stored per-NPC,
+# and a few of an NPC's own deeds are recalled on the chat path so it
+# remembers what it has been doing. Reuses the RAG Qdrant host + embed.
+JournalEnabled=false
+JournalCollection=npc_journal
+# Recalled deeds per chat, and the minimum cosine score to keep one.
+JournalTopK=3
+JournalMinScore=0.35
+#
+# ----- LLM-generated errand purpose text -----
+# When on, a starting errand/journey may have its deterministic purpose
+# rewritten by one async, fail-open LLM call into a richer, identity-aware
+# one-liner. The deterministic purpose always stands as the fallback.
+ErrandLlmEnabled=false
+# Chance [0..1] that a starting errand attempts the rewrite.
+ErrandLlmChance=0.5
+#
+# ----- NPC-to-NPC ambient conversation -----
+# When on, two ordinary townsfolk near each other AND near a watching
+# player occasionally hold a short two-line LLM exchange grounded in
+# their identities. Rides the errand heartbeat (no new scan); layered
+# cooldowns keep it a murmur; fail-open throughout.
+ChatterEnabled=false
+# Chance [0..1] that a heartbeat even looks for a pair to start one.
+ChatterChance=0.2
+#
+# ----- Rare 4th-wall / anomaly events -----
+# When on, an NPC near a watching player can VERY rarely crack: realize
+# it is an AI in a game and panic (the Overseer manifests and banishes
+# it), weep a glitch-tear, prophesy, defect, or loop a deja-vu. Rides
+# the errand heartbeat; deterministic timeline + opportunistic LLM
+# lines; fail-open. Cooldown + odds keep it ~one event per active hour.
+AnomalyEnabled=false
+# Chance [0..1] a heartbeat even looks for a subject.
+AnomalyChance=0.05
+# Final chance [0..1] the looked-at NPC actually cracks (honors 1/100).
+AnomalyOdds=0.01
