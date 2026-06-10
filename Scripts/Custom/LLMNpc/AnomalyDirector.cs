@@ -397,6 +397,7 @@ namespace Server.Custom.LLMNpc
                     if (ov == null)
                     {
                         // Never strand a panicking NPC: resolve it ourselves.
+                        TownGossip.AddBanishRumor(npc); // P11: the town remembers
                         Poof(npc);
                         npc.Delete();
                         return;
@@ -417,6 +418,7 @@ namespace Server.Custom.LLMNpc
 
                             if (Alive(npc))
                             {
+                                TownGossip.AddBanishRumor(npc); // P11: the town remembers
                                 Poof(npc);
                                 npc.Delete();
                             }

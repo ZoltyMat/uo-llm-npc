@@ -101,7 +101,12 @@ namespace Server.Custom.LLMNpc
                     if (bc.Controlled || bc.Summoned)
                         continue;
 
-                    if (!m.Body.IsHuman)
+                    // Human townsfolk have always been eligible. Also let hostile
+                    // creatures (monsters/undead — negative karma) answer, so spawned
+                    // witches, ghouls, orcs and the like respond in-character instead
+                    // of standing mute while a farther human NPC fields the line.
+                    // Benign non-human fauna (chickens, deer: karma >= 0) stay silent.
+                    if (!m.Body.IsHuman && bc.Karma >= 0)
                         continue;
 
                     double dist = from.GetDistanceToSqrt(m);
@@ -155,6 +160,10 @@ namespace Server.Custom.LLMNpc
             string system = BuildSystemPrompt(npc, player, id);
 
             NoteInteraction(npcSerial, playerSerial, id, text);
+
+            // P11: a salient line may enter the town's talk (chance-gated inside),
+            // where chatter and journeying NPCs can spread it.
+            TownGossip.MaybeAddPlayerRumor(npc, player, text);
 
             string key = npcSerial.ToString();
             string archetype = id != null ? id.Archetype : "";
@@ -284,8 +293,116 @@ namespace Server.Custom.LLMNpc
             }
         }
 
+        // A creature-kind label for the monster prompt. Reuses the named-monster
+        // cases InferVocation already knows (lich, ogre, orc, ...) and otherwise
+        // humanizes the type name (e.g. "Ghoul" -> "ghoul", "OrcishMage" -> "orcish
+        // mage"), so ANY hostile mob gets a sensible self-description with no table.
+        public static string InferCreatureKind(Mobile npc)
+        {
+            string v = InferVocation(npc);
+            switch (v)
+            {
+                case "lich":
+                case "ogre":
+                case "lizardman":
+                case "ratman":
+                case "gargoyle":
+                case "daemon":
+                case "orc":
+                    return v;
+            }
+
+            return Humanize(npc.GetType().Name);
+        }
+
+        // "LLMFeralOrc" -> "feral orc", "OrcishMage" -> "orcish mage", "Ghoul" ->
+        // "ghoul": drop a leading custom "LLM" prefix, split interior capitals,
+        // lowercase. A last-ditch fallback keeps the slot non-empty.
+        private static string Humanize(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+                return "creature";
+
+            if (typeName.StartsWith("LLM", StringComparison.Ordinal))
+                typeName = typeName.Substring(3);
+
+            StringBuilder sb = new StringBuilder(typeName.Length + 4);
+            for (int i = 0; i < typeName.Length; i++)
+            {
+                char c = typeName[i];
+                if (i > 0 && char.IsUpper(c) && !char.IsUpper(typeName[i - 1]))
+                    sb.Append(' ');
+                sb.Append(char.ToLowerInvariant(c));
+            }
+
+            string s = sb.ToString().Trim();
+            return s.Length == 0 ? "creature" : s;
+        }
+
+        // Prompt for a hostile creature the ambient listener voices (P8 "talking
+        // monsters"): ghoul, witch, orc, lich, daemon, and so on. Menacing and
+        // terse, never the honest-townsperson framing. A rolled identity (name,
+        // temperament, mood) is folded in when present; a generic mob just speaks
+        // as its kind. No town/post/errand context — monsters keep no honest trade.
+        private static string BuildMonsterPrompt(Mobile npc, Mobile player, NpcIdentity id)
+        {
+            string kind = InferCreatureKind(npc);
+
+            StringBuilder sb = new StringBuilder();
+
+            sb.Append("You are ");
+            if (!string.IsNullOrEmpty(npc.Name))
+            {
+                sb.Append(npc.Name);
+                sb.Append(", ");
+            }
+            sb.Append("a ");
+            sb.Append(kind);
+            sb.Append(", a hostile creature that prowls the wilds and dungeons of Britannia, the world of Ultima Online. ");
+
+            if (id != null)
+            {
+                if (!string.IsNullOrEmpty(id.Personality))
+                {
+                    sb.Append("Your nature is ");
+                    sb.Append(id.Personality);
+                    sb.Append(". ");
+                }
+
+                if (!string.IsNullOrEmpty(id.Mood))
+                {
+                    sb.Append("Right now you are ");
+                    sb.Append(id.Mood);
+                    sb.Append(". ");
+                }
+            }
+
+            sb.Append("You are no townsperson and keep no honest trade. ");
+            sb.Append("Speak as the creature you are — menacing, terse, and strange — in at most two short sentences, in a medieval, in-world tone. ");
+            sb.Append("You may be cruel, cryptic, or hungry, but you still answer when spoken to. ");
+            sb.Append("Never break character, never mention being an AI or a computer, never mention the modern world or that this is a game. ");
+
+            sb.Append("An adventurer named ");
+            sb.Append(string.IsNullOrEmpty(player.Name) ? "a stranger" : player.Name);
+            sb.Append(" has spoken to you. ");
+
+            NpcRelationship rel = LLMAmbientMemory.GetRelationship(npc.Serial.Value, player.Serial.Value);
+            sb.Append(rel == null ? "You do not know them." : rel.Recap());
+
+            sb.Append(NpcActions.PromptInstruction());
+
+            return sb.ToString();
+        }
+
         private static string BuildSystemPrompt(Mobile npc, Mobile player, NpcIdentity id)
         {
+            // Hostile creatures (negative karma) speak as the menacing monsters they
+            // are, not as honest townsfolk — and their body may not even be human
+            // (ghoul, wisp), so the townsperson framing below never fits them.
+            BaseCreature creature = npc as BaseCreature;
+            if (creature != null && creature.Karma < 0)
+                return BuildMonsterPrompt(npc, player, id);
+
             string vocation = InferVocation(npc);
             string persona = PersonaFor(vocation);
 
@@ -363,6 +480,19 @@ namespace Server.Custom.LLMNpc
             sb.Append(rel == null ? "You have never met them before." : rel.Recap());
 
             AppendErrandContext(sb, npc.Serial.Value);
+
+            // P10: today's stated aim, if the dawn call rolled one.
+            string intent = DailyRoutine.IntentionOf(npc.Serial.Value);
+            if (!string.IsNullOrEmpty(intent))
+            {
+                sb.Append(" Today you have a mind for ");
+                sb.Append(intent);
+                sb.Append(".");
+            }
+
+            // P11/P12: the talk of the town, sharable when conversation invites it.
+            sb.Append(TownGossip.PromptBlock(id != null && !string.IsNullOrEmpty(id.Town)
+                ? id.Town : BritanniaGeography.TownOf(npc)));
 
             sb.Append(NpcActions.PromptInstruction());
 

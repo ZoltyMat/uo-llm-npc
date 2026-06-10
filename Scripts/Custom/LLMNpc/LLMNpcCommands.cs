@@ -26,6 +26,168 @@ namespace Server.Custom.LLMNpc
             CommandSystem.Register("ErrandTrip", AccessLevel.GameMaster, new CommandEventHandler(ErrandTrip_OnCommand));
             CommandSystem.Register("ErrandStatus", AccessLevel.GameMaster, new CommandEventHandler(ErrandStatus_OnCommand));
             CommandSystem.Register("AnomalyTest", AccessLevel.GameMaster, new CommandEventHandler(AnomalyTest_OnCommand));
+            CommandSystem.Register("GossipBoard", AccessLevel.GameMaster, new CommandEventHandler(GossipBoard_OnCommand));
+            CommandSystem.Register("GossipSeed", AccessLevel.GameMaster, new CommandEventHandler(GossipSeed_OnCommand));
+            CommandSystem.Register("RoutinePlan", AccessLevel.GameMaster, new CommandEventHandler(RoutinePlan_OnCommand));
+            CommandSystem.Register("RoutineNow", AccessLevel.GameMaster, new CommandEventHandler(RoutineNow_OnCommand));
+            CommandSystem.Register("ObserveTest", AccessLevel.GameMaster, new CommandEventHandler(ObserveTest_OnCommand));
+            CommandSystem.Register("OverseerTest", AccessLevel.GameMaster, new CommandEventHandler(OverseerTest_OnCommand));
+        }
+
+        [Usage("ObserveTest")]
+        [Description("Target a player to force a P13 observation rumor onto your current town's board (bypasses all gates).")]
+        public static void ObserveTest_OnCommand(CommandEventArgs e)
+        {
+            e.Mobile.SendMessage(0x35, "Target a player to observe.");
+            e.Mobile.Target = new ObserveTarget();
+        }
+
+        private class ObserveTarget : Target
+        {
+            public ObserveTarget()
+                : base(12, false, TargetFlags.None)
+            {
+            }
+
+            protected override void OnTarget(Mobile from, object targeted)
+            {
+                Mobile player = targeted as Mobile;
+
+                if (player == null)
+                {
+                    from.SendMessage(0x22, "That is not a mobile.");
+                    return;
+                }
+
+                string text = TownGossip.ForceObservation(player, from);
+
+                if (string.IsNullOrEmpty(text))
+                    from.SendMessage(0x22, "Nothing about {0} was worth a rumor (no notable gear, karma, fame, or grandmaster skill).", player.Name);
+                else
+                    from.SendMessage(0x40, "Boarded in {0}: {1}", BritanniaGeography.TownOf(from), text);
+            }
+        }
+
+        [Usage("OverseerTest <verb>")]
+        [Description("Target an Overseer to run one of its P14 powers directly (storm|rats|wolves|orcs|undead|bless|gift|depart). You are the supplicant.")]
+        public static void OverseerTest_OnCommand(CommandEventArgs e)
+        {
+            string verb = e.Length > 0 ? e.GetString(0).ToLowerInvariant() : "";
+
+            if (!OverseerActions.IsGmVerb(verb))
+            {
+                e.Mobile.SendMessage(0x22, "Usage: OverseerTest storm|rats|wolves|orcs|undead|bless|gift|depart");
+                return;
+            }
+
+            e.Mobile.SendMessage(0x35, "Target an Overseer to perform '{0}'.", verb);
+            e.Mobile.Target = new OverseerTarget(verb);
+        }
+
+        private class OverseerTarget : Target
+        {
+            private readonly string m_Verb;
+
+            public OverseerTarget(string verb)
+                : base(12, false, TargetFlags.None)
+            {
+                m_Verb = verb;
+            }
+
+            protected override void OnTarget(Mobile from, object targeted)
+            {
+                LLMOverseer overseer = targeted as LLMOverseer;
+
+                if (overseer == null)
+                {
+                    from.SendMessage(0x22, "That is not an Overseer.");
+                    return;
+                }
+
+                OverseerActions.Perform(overseer, from, m_Verb);
+                from.SendMessage(0x40, "{0} performs '{1}'.", overseer.Name, m_Verb);
+            }
+        }
+
+        [Usage("GossipBoard")]
+        [Description("Lists the rumor board of the town you are standing in (P11/P12).")]
+        public static void GossipBoard_OnCommand(CommandEventArgs e)
+        {
+            string town = BritanniaGeography.TownOf(e.Mobile);
+            e.Mobile.SendMessage(0x40, "Talk of {0}:", town);
+
+            List<string> lines = TownGossip.StatusLines(town);
+            for (int i = 0; i < lines.Count; i++)
+                e.Mobile.SendMessage(0x35, lines[i]);
+        }
+
+        [Usage("GossipSeed <text>")]
+        [Description("Injects a rumor onto the board of the town you are standing in (testing).")]
+        public static void GossipSeed_OnCommand(CommandEventArgs e)
+        {
+            string text = e.ArgString == null ? "" : e.ArgString.Trim();
+
+            if (text.Length == 0)
+            {
+                e.Mobile.SendMessage(0x22, "Usage: GossipSeed <text>");
+                return;
+            }
+
+            string town = BritanniaGeography.TownOf(e.Mobile);
+            TownGossip.Add(town, text);
+            e.Mobile.SendMessage(0x40, "Seeded onto the {0} board: {1}", town, text);
+        }
+
+        [Usage("RoutinePlan")]
+        [Description("Target an NPC to see its day plan: legs, done flags, and today's intention (P10).")]
+        public static void RoutinePlan_OnCommand(CommandEventArgs e)
+        {
+            e.Mobile.SendMessage(0x35, "Target an NPC to inspect its day plan.");
+            e.Mobile.Target = new RoutineTarget(false);
+        }
+
+        [Usage("RoutineNow")]
+        [Description("Target an NPC to force its next undone day-plan leg due immediately (testing).")]
+        public static void RoutineNow_OnCommand(CommandEventArgs e)
+        {
+            e.Mobile.SendMessage(0x35, "Target an NPC to force its next routine leg now.");
+            e.Mobile.Target = new RoutineTarget(true);
+        }
+
+        private class RoutineTarget : Target
+        {
+            private readonly bool m_Force;
+
+            public RoutineTarget(bool force)
+                : base(12, false, TargetFlags.None)
+            {
+                m_Force = force;
+            }
+
+            protected override void OnTarget(Mobile from, object targeted)
+            {
+                BaseCreature npc = targeted as BaseCreature;
+
+                if (npc == null)
+                {
+                    from.SendMessage(0x22, "That is not an NPC.");
+                    return;
+                }
+
+                if (m_Force)
+                {
+                    if (DailyRoutine.ForceNextLeg(npc))
+                        from.SendMessage(0x40, "{0}'s next routine leg is due now (it starts on the director's next decision pass).", npc.Name);
+                    else
+                        from.SendMessage(0x22, "{0} has no undone routine leg today (or no plan yet — let it idle near you first).", npc.Name);
+                    return;
+                }
+
+                List<string> lines = DailyRoutine.PlanLines(npc);
+                from.SendMessage(0x40, "{0}'s day:", npc.Name);
+                for (int i = 0; i < lines.Count; i++)
+                    from.SendMessage(0x35, lines[i]);
+            }
         }
 
         [Usage("AnomalyTest [crisis|tear|prophet|defector|dejavu]")]
@@ -135,7 +297,7 @@ namespace Server.Custom.LLMNpc
                     if (ok)
                         from.SendMessage(0x40, "{0} sets off: {1}", npc.Name, ErrandDirector.Describe(npc));
                     else
-                        from.SendMessage(0x22, "{0} could not start an errand (stationary class or no reachable spot).", npc.Name);
+                        from.SendMessage(0x22, "{0} could not start an errand (cannot walk, or no reachable spot).", npc.Name);
 
                     return;
                 }

@@ -42,8 +42,9 @@ namespace Server.Custom.LLMNpc
         // wedged or perpetually-watched NPC never strands itself off-post.
         private static readonly TimeSpan TravelDeadline = TimeSpan.FromMinutes(12);
 
-        // If the NPC hasn't moved a tile in this long mid-travel, fire one A* nudge.
-        private static readonly TimeSpan StuckGrace = TimeSpan.FromSeconds(12.0);
+        // If the NPC hasn't moved a tile in this long mid-travel, start firing A*
+        // nudges (every heartbeat, until it's moving again — see Progress).
+        private static readonly TimeSpan StuckGrace = TimeSpan.FromSeconds(4.0);
 
         // Idle re-roll cadence and per-class chance of setting off when the window
         // elapses. Cooldown after an errand completes before the next is considered.
@@ -115,6 +116,10 @@ namespace Server.Custom.LLMNpc
                     if (map == null || map == Map.Internal || !MapAllowed(map))
                         continue;
 
+                    // The first plain townsperson in range doubles as this
+                    // player's potential P13 observer — the one who "noticed" them.
+                    BaseCreature observer = null;
+
                     IPooledEnumerable eable = map.GetMobilesInRange(player.Location, SimRange);
 
                     foreach (Mobile m in eable)
@@ -123,13 +128,28 @@ namespace Server.Custom.LLMNpc
                         if (bc == null || bc.Deleted)
                             continue;
 
-                        if (ErrandPolicy.Classify(bc) == MobilityClass.Stationary)
+                        if (observer == null && bc.Body.IsHuman && bc.Karma >= 0 &&
+                            !bc.Controlled && !bc.Summoned && !(bc is LLMOverseer))
+                            observer = bc;
+
+                        // Stationary NPCs never roam on their own, but a GM force
+                        // (ErrandGo/ErrandTrip) sets an errand on one regardless of
+                        // class. Still tick those, or the forced trip is set but the
+                        // state machine never advances and the NPC never moves.
+                        if (ErrandPolicy.Classify(bc) == MobilityClass.Stationary &&
+                            !HasActiveErrand(bc))
                             continue;
 
                         seen.Add(bc);
                     }
 
                     eable.Free();
+
+                    // P13: a watched player is also a SEEN player — a nearby
+                    // townsperson may put an impression of them on the town board.
+                    // Heavily cooldown-gated inside; deterministic; no LLM call.
+                    if (observer != null)
+                        TownGossip.MaybeObservePlayer(player, observer, now);
                 }
 
                 foreach (BaseCreature bc in seen)
@@ -226,6 +246,11 @@ namespace Server.Custom.LLMNpc
 
             MobilityClass cls = ErrandPolicy.Classify(npc);
 
+            // P10: a scheduled day-plan leg takes precedence over the random rolls,
+            // so the smith's midday tavern lunch isn't pre-empted by a dice errand.
+            if (DailyRoutine.TryStartLeg(npc, e, now, cls))
+                return;
+
             // Only true Roamers take cross-continent trips, and only rarely. Rolled
             // before the local-errand chance so a journey can pre-empt a local errand.
             if (cls == MobilityClass.Roamer && Utility.RandomDouble() < JourneyChance)
@@ -260,6 +285,10 @@ namespace Server.Custom.LLMNpc
             e.StartedUtc = now;
             e.PhaseDeadlineUtc = now.Add(TravelDeadline);
 
+            // A reused record may carry a routine leg's dwell window; clear it.
+            e.DwellMinSec = 0;
+            e.DwellMaxSec = 0;
+
             ResetProgress(npc, e, now);
 
             // Retarget native wander toward the destination.
@@ -270,10 +299,56 @@ namespace Server.Custom.LLMNpc
             MaybeRefineKind(npc, e, null, false);
         }
 
+        // Start an errand to an EXPLICIT destination with a fixed purpose — the
+        // P10 routine path ("the midday meal at the tavern" walks to where the
+        // tavernkeeper actually stands). Same mechanics as StartErrand otherwise;
+        // the optional dwell window lets a lunch linger longer than a market stop.
+        public static bool StartRoutineErrand(BaseCreature npc, Errand e, DateTime now,
+            Point3D dest, string kind, int dwellMinSec, int dwellMaxSec)
+        {
+            if (npc == null || npc.Deleted || npc.Map == null || npc.Map == Map.Internal)
+                return false;
+
+            if (npc.CantWalk || e == null || e.Active)
+                return false;
+
+            Point3D post = npc.Home != Point3D.Zero ? npc.Home : npc.Location;
+
+            if (dest == post)
+                return false;
+
+            e.Post = post;
+            e.PostRangeHome = npc.RangeHome > 0 ? npc.RangeHome : 6;
+
+            e.Kind = string.IsNullOrEmpty(kind) ? "tending to a small task in town" : kind;
+            e.Destination = dest;
+            e.State = ErrandState.Outbound;
+            e.StartedUtc = now;
+            e.PhaseDeadlineUtc = now.Add(TravelDeadline);
+
+            e.DwellMinSec = dwellMinSec;
+            e.DwellMaxSec = dwellMaxSec;
+
+            ResetProgress(npc, e, now);
+
+            npc.Home = dest;
+            npc.RangeHome = 1;
+
+            MaybeRefineKind(npc, e, null, false);
+
+            return true;
+        }
+
         private static void BeginDwell(Errand e, DateTime now)
         {
             e.State = ErrandState.Dwelling;
-            e.DwellUntilUtc = now.AddSeconds(Utility.RandomMinMax(20, 60));
+
+            // Routine legs (P10) may carry their own dwell window — a tavern
+            // lunch lingers; everything else mills about for the default beat.
+            int min = e.DwellMinSec > 0 ? e.DwellMinSec : 20;
+            int max = e.DwellMaxSec >= min ? e.DwellMaxSec : 60;
+
+            e.DwellUntilUtc = now.AddSeconds(Utility.RandomMinMax(min, max));
         }
 
         private static void BeginReturn(BaseCreature npc, Errand e, DateTime now)
@@ -323,14 +398,21 @@ namespace Server.Custom.LLMNpc
             e.PostRangeHome = npc.RangeHome > 0 ? npc.RangeHome : 6;
 
             e.Journey = true;
+            e.JourneyCity = city;
             e.Kind = ErrandPolicy.RollJourneyKind(LLMAmbientSpeech.InferVocation(npc), city);
             e.Destination = dest;
             e.StartedUtc = now;
             e.State = ErrandState.Dwelling;
             e.DwellUntilUtc = now.AddSeconds(Utility.RandomMinMax(DwellAbroadMin, DwellAbroadMax));
             e.PhaseDeadlineUtc = e.DwellUntilUtc;
+            e.DwellMinSec = 0;
+            e.DwellMaxSec = 0;
 
             RecallTo(npc, dest);
+
+            // P11: the traveler carries its home town's talk abroad, and its
+            // arrival is itself something the destination town notices.
+            TownGossip.OnJourneyArrive(npc, fromTown, city);
 
             // Mill about the destination city while abroad.
             npc.Home = dest;
@@ -356,8 +438,12 @@ namespace Server.Custom.LLMNpc
             // e.Kind already names the destination city, so it reads as a full deed.
             LLMAmbientMemory.AppendJournal(npc.Serial.Value, e.Kind);
 
+            // P11: the traveler carries the visited city's talk back home.
+            TownGossip.OnJourneyReturn(e.JourneyCity, BritanniaGeography.TownOf(npc));
+
             e.State = ErrandState.None;
             e.Journey = false;
+            e.JourneyCity = "";
             e.Kind = "";
             e.NextDecisionUtc = now.Add(CooldownJourney);
 
@@ -539,13 +625,13 @@ namespace Server.Custom.LLMNpc
                 return;
             }
 
-            if (!e.NudgedSinceProgress && (now - e.LastProgressUtc) >= StuckGrace)
-            {
-                e.NudgedSinceProgress = true;
-
-                if (npc.AIObject != null)
-                    npc.AIObject.MoveTo(target, false, 1);
-            }
+            // Stalled. Native random wander frequently won't carry an NPC across
+            // town to a far retargeted Home — it meanders and never arrives, so the
+            // NPC reads as "didn't move." Once it's been stuck past the grace, fire
+            // a directed A* step EVERY heartbeat (not once) until it's progressing
+            // again. The wall-clock PhaseDeadline still rescues a true dead-end.
+            if ((now - e.LastProgressUtc) >= StuckGrace && npc.AIObject != null)
+                npc.AIObject.MoveTo(target, false, 1);
         }
 
         private static void ResetProgress(BaseCreature npc, Errand e, DateTime now)
@@ -562,6 +648,13 @@ namespace Server.Custom.LLMNpc
         public static bool ForceErrand(BaseCreature npc)
         {
             if (npc == null || npc.Deleted || npc.Map == null || npc.Map == Map.Internal)
+                return false;
+
+            // An NPC that physically cannot walk (e.g. the LLMOverseer GM-avatar,
+            // which manifests in place) can never fulfil a local errand. Reject up
+            // front so the GM gets a clear "could not start" message instead of a
+            // doomed errand that announces "sets off" but never actually moves.
+            if (npc.CantWalk)
                 return false;
 
             DateTime now = DateTime.UtcNow;
@@ -584,6 +677,10 @@ namespace Server.Custom.LLMNpc
         public static bool ForceJourney(BaseCreature npc)
         {
             if (npc == null || npc.Deleted || npc.Map == null || npc.Map == Map.Internal)
+                return false;
+
+            // CantWalk avatars (LLMOverseer) manifest in place and never travel.
+            if (npc.CantWalk)
                 return false;
 
             DateTime now = DateTime.UtcNow;
@@ -628,6 +725,15 @@ namespace Server.Custom.LLMNpc
                 return "now";
 
             return "in " + (int)Math.Round((utc - now).TotalSeconds) + "s";
+        }
+
+        // True if this NPC currently has an in-flight errand record. Lets the
+        // player-centric scan still advance an otherwise-Stationary NPC that a GM
+        // forced onto an errand, without ever creating a record for one that has none.
+        private static bool HasActiveErrand(BaseCreature bc)
+        {
+            Errand e;
+            return LLMAmbientMemory.TryGetErrand(bc.Serial.Value, out e) && e != null && e.Active;
         }
 
         private static int DistSq(Point3D a, Point3D b)

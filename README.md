@@ -7,8 +7,13 @@ vector RAG over [Qdrant](https://qdrant.tech/).
 
 A peasant you greet remembers you next time. A blacksmith has opinions about
 the war and a town he hails from. Two townsfolk hold a murmured conversation
-when you wander past. And once in a long while, one of them realizes it is an
-AI in a game and panics — before the world quietly mends itself.
+when you wander past. NPCs keep daily routines — a morning task, a midday
+meal at the actual tavern — and towns keep rumor boards: what players say,
+who slew what, who walks around in grandmaster plate, all of it carried
+between cities by traveling NPCs. Beg the realm's Overseer for a weapon and
+it will deflect you; earn one, and the gift always carries a hidden price.
+And once in a long while, an NPC realizes it is an AI in a game and panics —
+before the world quietly mends itself.
 
 Write-up of how and why this was built:
 **https://blog.zolty.systems/posts/2026-06-03-llm-npcs-ultima-online/**
@@ -55,6 +60,10 @@ logic with no separate build step. The design rests on a few rules:
 | `BritanniaGeography.cs` | Maps a position to the town an NPC belongs to, so personas know whom they serve. |
 | `LLMRag.cs` | Optional Qdrant retrieval: lore grounding, voice-style exemplars, and a per-NPC deed journal, plus Ollama embeddings. |
 | `AnomalyDirector.cs` | Rare, player-gated 4th-wall "anomaly" events and the GM-avatar that mends them. |
+| `DailyRoutine.cs` | Vocation-shaped day plans per game day — legs anchor to real NPCs (the tavern is wherever the tavernkeeper stands), executed by the errand engine. |
+| `TownGossip.cs` | Per-town rumor boards: player talk, deaths, notable kills, banishments, and impressions of players themselves (gear, karma, mastery) — carried between towns by journeying NPCs, surfaced through chat. Zero extra LLM calls. |
+| `OverseerActions.cs` | The Overseer's closed GM-tier verb list: harmless storms, small auto-expiring spawn packs, blessings, gifts, departure — every effect capped and cooldown-gated in code. |
+| `GenieGifts.cs` | The genie rule: any weapon the Overseer grants pairs a real power with a real flaw (it bites its wielder, drains life, or is cursed). The model picks the verb; it cannot mint an unflawed item. |
 | `LLMNpcCommands.cs` | In-game GM/admin commands (`[LLMReload`, diagnostics, toggles). |
 
 ## Requirements
@@ -86,6 +95,8 @@ commented list. Highlights:
 - `BaseUrl` / `ApiKey` / `Model` — the endpoint and model.
 - `RagEnabled` + `RagUrl` / `RagCollection` — optional lore grounding.
 - `ChatterEnabled` — NPC-to-NPC ambient conversation.
+- `RoutineEnabled` — daily routines (a UO day is ~2 real hours).
+- `GossipEnabled` — town rumor boards, cross-town spread, player observation.
 - `AnomalyEnabled` — the rare 4th-wall events.
 - Cooldowns, hear-range, token/length caps — anti-spam and latency control.
 

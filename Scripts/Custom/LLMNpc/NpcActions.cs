@@ -42,6 +42,14 @@ namespace Server.Custom.LLMNpc
 
         public static string Extract(string reply, out string verb)
         {
+            return Extract(reply, null, out verb);
+        }
+
+        // Overload with an additional caller-supplied allowlist — the Overseer
+        // (P14) recognizes its GM-tier verbs on top of the cosmetic set. The
+        // extra list is just more closed vocabulary; extraction stays identical.
+        public static string Extract(string reply, string[] extraVerbs, out string verb)
+        {
             verb = "";
 
             if (string.IsNullOrEmpty(reply))
@@ -56,7 +64,7 @@ namespace Server.Custom.LLMNpc
                 for (int j = 0; j < words.Count; j++)
                 {
                     string w = words[j].Value.ToLowerInvariant();
-                    if (IsKnown(w))
+                    if (IsKnown(w) || InList(extraVerbs, w))
                         chosen = w; // last known token in this bracket wins
                 }
 
@@ -191,8 +199,16 @@ namespace Server.Custom.LLMNpc
 
         private static bool IsKnown(string verb)
         {
-            for (int i = 0; i < m_Verbs.Length; i++)
-                if (m_Verbs[i] == verb)
+            return InList(m_Verbs, verb);
+        }
+
+        private static bool InList(string[] list, string verb)
+        {
+            if (list == null)
+                return false;
+
+            for (int i = 0; i < list.Length; i++)
+                if (list[i] == verb)
                     return true;
 
             return false;

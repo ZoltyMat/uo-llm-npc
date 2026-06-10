@@ -331,9 +331,24 @@ namespace Server.Custom.LLMNpc
             }
 
             if (initiating)
+            {
                 sb.Append("Greet them or make a brief remark — a passing word, a question, a bit of local talk or shop gossip. ");
+
+                // P11: seed the opener with the town's freshest talk, so an
+                // exchange can actually pass a rumor along instead of being
+                // pure pleasantry. The reply side reacts to whatever was said.
+                string rumor = TownGossip.PickOne(town);
+                if (!string.IsNullOrEmpty(rumor))
+                {
+                    sb.Append("You have lately heard this talk about town: ");
+                    sb.Append(rumor);
+                    sb.Append(" — you might mention it if it suits the moment. ");
+                }
+            }
             else
+            {
                 sb.Append("Answer them naturally. ");
+            }
 
             sb.Append("Reply with at most ONE short sentence in a medieval, in-world tone. ");
             sb.Append("Speak only your own words: no name label, no quotation marks, no narration. ");

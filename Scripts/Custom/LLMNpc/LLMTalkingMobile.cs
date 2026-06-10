@@ -203,7 +203,44 @@ namespace Server.Mobiles
             NpcRelationship rel = GetRelationship(player);
             sb.Append(rel == null ? "You have never met them before." : rel.Recap());
 
+            // P10/P11: townsfolk surface today's aim and the talk of the town;
+            // wild speakers keep no civic gossip.
+            if (!IsMonsterSpeaker)
+            {
+                string intent = DailyRoutine.IntentionOf(this.Serial.Value);
+                if (!string.IsNullOrEmpty(intent))
+                {
+                    sb.Append(" Today you have a mind for ");
+                    sb.Append(intent);
+                    sb.Append(".");
+                }
+
+                sb.Append(TownGossip.PromptBlock(id != null && !string.IsNullOrEmpty(id.Town)
+                    ? id.Town : BritanniaGeography.TownOf(this)));
+            }
+
+            // P7/P14: the (closed) action vocabulary — cosmetic gestures for
+            // ordinary talkers, the keeper's powers for the Overseer (override).
+            sb.Append(ActionInstruction());
+
             return sb.ToString();
+        }
+
+        // ---- action tags (P7 cosmetic; P14 overrides for the Overseer) --------
+
+        protected virtual string ActionInstruction()
+        {
+            return NpcActions.PromptInstruction();
+        }
+
+        protected virtual string ExtractAction(string reply, out string verb)
+        {
+            return NpcActions.Extract(reply, out verb);
+        }
+
+        protected virtual void PerformAction(Mobile player, string verb)
+        {
+            NpcActions.Perform(this, verb);
         }
 
         protected virtual void Respond(Mobile player, string text)
@@ -222,11 +259,18 @@ namespace Server.Mobiles
 
             NoteInteraction(player, text);
 
+            // P11: a salient line told to a townsperson may enter the town's talk
+            // (chance-gated inside). Monsters don't carry civic gossip.
+            if (!IsMonsterSpeaker)
+                TownGossip.MaybeAddPlayerRumor(this, player, text);
+
             string key = npcSerial.ToString();
             string archetype = (m_Identity != null) ? m_Identity.Archetype : "";
             string region = (m_Identity != null) ? m_Identity.Town : "";
 
             LLMTalkingMobile mob = this;
+
+            Mobile talker = player;
 
             LLMClient.TryDispatch(key, system, history, text, region, archetype, npcSerial, delegate(bool ok, string reply)
             {
@@ -236,10 +280,19 @@ namespace Server.Mobiles
                 if (!ok || string.IsNullOrEmpty(reply))
                     return;
 
-                LLMConversation.Record(npcSerial, playerSerial, "user", text);
-                LLMConversation.Record(npcSerial, playerSerial, "assistant", reply);
+                // Strip an action tag before speaking/recording; run the action
+                // after the words so the gesture (or the Overseer's power) lands
+                // on what was just said.
+                string verb;
+                string spoken = mob.ExtractAction(reply, out verb);
 
-                mob.SpeakReply(reply);
+                LLMConversation.Record(npcSerial, playerSerial, "user", text);
+                LLMConversation.Record(npcSerial, playerSerial, "assistant", spoken);
+
+                if (spoken.Length > 0)
+                    mob.SpeakReply(spoken);
+
+                mob.PerformAction(talker, verb);
             });
         }
 
@@ -1203,6 +1256,25 @@ namespace Server.Mobiles
                        "other fires to put out: warm but harried, reassuring, deflecting, never admitting how " +
                        "thin the ice truly is.";
             }
+        }
+
+        // P14: the Overseer recognizes and may wield the keeper's powers — a
+        // closed, capped verb list (see OverseerActions). The instruction also
+        // carries the hardening: it is not easily begged into gifts, and any
+        // gift it does grant is a genie-rule bargain rolled by GenieGifts.
+        protected override string ActionInstruction()
+        {
+            return OverseerActions.PromptInstruction();
+        }
+
+        protected override string ExtractAction(string reply, out string verb)
+        {
+            return OverseerActions.Extract(reply, out verb);
+        }
+
+        protected override void PerformAction(Mobile player, string verb)
+        {
+            OverseerActions.Perform(this, player, verb);
         }
 
         public override void Serialize(GenericWriter writer)

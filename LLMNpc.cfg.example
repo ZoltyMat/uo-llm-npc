@@ -1,17 +1,18 @@
 # LLMNpc.cfg - configuration for LLM-driven NPC dialog.
-# Copy this to Config/LLMNpc.cfg in your shard, edit, and run
-# [LLMReload in-game to apply without a restart.
+# Edit and run [LLMReload in-game to apply without a restart.
 #
-# The server also writes a default copy of this file the first time it
-# boots without one, so you can let it generate the scaffold and edit.
+# This is the committed TEMPLATE. Copy to LLMNpc.cfg and fill in secrets
+# locally; the real LLMNpc.cfg is gitignored. In the container the Dockerfile
+# blanks ApiKey/RagApiKey at build and the live values arrive via env
+# (RAG_API_KEY etc. from the uo-llm-npc-secrets k8s Secret).
 #
 # Master switch. NPCs only call the model when this is true.
-Enabled=false
+Enabled=true
 #
 # OpenAI-compatible endpoint. Must include /v1 and no trailing slash.
-# Default: a local Ollama instance (no auth, local, free).
+# Default: Ollama-direct on the Mac Studio (no auth, local, free).
 BaseUrl=http://127.0.0.1:11434/v1
-# Gateway alternative (needs a valid virtual key in ApiKey):
+# LiteLLM gateway alternative (needs a valid virtual key in ApiKey):
 # BaseUrl=https://your-litellm-gateway.example/v1
 ApiKey=
 Model=qwen3-coder:30b
@@ -26,7 +27,7 @@ CooldownMs=2500
 # Conversation turns of memory replayed per (player, npc) pair.
 MaxMemoryTurns=6
 # Tiles within which an NPC hears nearby speech.
-HearRange=4
+HearRange=12
 # Hard cap on spoken reply length.
 MaxReplyChars=240
 #
@@ -35,10 +36,10 @@ InsecureTls=false
 # Restrict to one map by name (e.g. Felucca). Empty = any map.
 AllowedMap=
 #
-# ----- Retrieval-augmented lore (Qdrant) -----
-# When on, replies are grounded with a vector search over a lore
-# collection. Fail-open: any RAG error just drops the lore for that reply.
-RagEnabled=false
+# ----- Retrieval-augmented lore (cluster Qdrant) -----
+# When on, replies are grounded with a vector search over a lore collection.
+# Fail-open: any RAG error just drops the lore for that reply.
+RagEnabled=true
 # Qdrant REST base (no trailing slash) and an API key with read access.
 RagUrl=http://127.0.0.1:6333
 RagApiKey=
@@ -52,52 +53,67 @@ RagMinScore=0.35
 # Per-call timeout (embed, search) in ms.
 RagTimeoutMs=6000
 #
-# ----- Voice-style grounding (exemplar lines) -----
-# When on, replies are seasoned with a few archetype-matched exemplar
-# lines (cadence/wit, setting stripped) from a style collection.
-# Reuses the same Qdrant host + embedding endpoint as RAG above.
-StyleEnabled=false
+# ----- Voice-style grounding (BG3-derived exemplars) -----
+# When on, replies are seasoned with a few archetype-matched exemplar lines
+# (cadence/wit, setting stripped) from the bg3_style collection. Reuses the same
+# Qdrant host + embedding endpoint as RAG above.
+StyleEnabled=true
 StyleCollection=bg3_style
 # Exemplars to retrieve, and the minimum cosine score to keep one.
 # MinScore=0 keeps stylistic flavor even on a loose topical match.
 StyleTopK=4
 StyleMinScore=0.0
 #
-# ----- NPC journal (deeds -> Qdrant npc_journal) -----
-# When on, each completed errand/journey is embedded + stored per-NPC,
-# and a few of an NPC's own deeds are recalled on the chat path so it
-# remembers what it has been doing. Reuses the RAG Qdrant host + embed.
-JournalEnabled=false
+# ----- Per-NPC episodic memory (npc_journal) -----
+# When on, an NPC's own completed deeds (errands, journeys) are embedded and
+# upserted to the npc_journal collection as they happen, and a vector search
+# filtered to the speaking NPC's serial recalls topically-relevant deeds on the
+# chat path. Reuses the same Qdrant host + embedding endpoint as RAG above.
+# Fail-open: any miss/error just drops the journal block for that reply.
+JournalEnabled=true
 JournalCollection=npc_journal
-# Recalled deeds per chat, and the minimum cosine score to keep one.
+# Deeds to recall, and the minimum cosine score to keep one.
 JournalTopK=3
 JournalMinScore=0.35
 #
-# ----- LLM-generated errand purpose text -----
-# When on, a starting errand/journey may have its deterministic purpose
-# rewritten by one async, fail-open LLM call into a richer, identity-aware
-# one-liner. The deterministic purpose always stands as the fallback.
-ErrandLlmEnabled=false
-# Chance [0..1] that a starting errand attempts the rewrite.
+# ----- LLM-generated errand purpose (P4) -----
+# When on, an NPC's errand/journey purpose text is rewritten by the model to be
+# identity-aware (town, vocation, temperament, mood, destination city) instead
+# of the deterministic template. Async + fail-open + cooldown-gated: any miss
+# keeps the plain deterministic purpose. The richer purpose then flows into the
+# journal deed and chat context automatically.
+ErrandLlmEnabled=true
+# Per-errand probability (0..1) of attempting the LLM rewrite.
 ErrandLlmChance=0.5
 #
-# ----- NPC-to-NPC ambient conversation -----
-# When on, two ordinary townsfolk near each other AND near a watching
-# player occasionally hold a short two-line LLM exchange grounded in
-# their identities. Rides the errand heartbeat (no new scan); layered
-# cooldowns keep it a murmur; fail-open throughout.
-ChatterEnabled=false
-# Chance [0..1] that a heartbeat even looks for a pair to start one.
+# ----- NPC-to-NPC ambient conversation (P6) -----
+# When on, two ordinary townsfolk standing near each other AND near a watching
+# player occasionally hold a short two-line LLM exchange, each grounded in its
+# own persisted identity and what it remembers of the other (and each free to
+# carry a safe cosmetic action). Rides the errand heartbeat's player-visible NPC
+# set (no new scan/timer, never in an empty town); a shard-wide global cooldown
+# plus a per-NPC cooldown keep the town a murmur. Fail-open: any miss = silence.
+ChatterEnabled=true
+# Per-heartbeat probability (0..1) of even looking for a pair to start one.
 ChatterChance=0.2
 #
-# ----- Rare 4th-wall / anomaly events -----
-# When on, an NPC near a watching player can VERY rarely crack: realize
-# it is an AI in a game and panic (the Overseer manifests and banishes
-# it), weep a glitch-tear, prophesy, defect, or loop a deja-vu. Rides
-# the errand heartbeat; deterministic timeline + opportunistic LLM
-# lines; fail-open. Cooldown + odds keep it ~one event per active hour.
-AnomalyEnabled=false
-# Chance [0..1] a heartbeat even looks for a subject.
-AnomalyChance=0.05
-# Final chance [0..1] the looked-at NPC actually cracks (honors 1/100).
-AnomalyOdds=0.01
+# ----- Daily routines (P10) -----
+# When on, an idle NPC consults a vocation-shaped plan for the current game day
+# (a UO day is ~2 real hours) before rolling random errands: a morning task, a
+# midday meal at the ACTUAL tavern (legs anchor to real NPCs found near the
+# post), an afternoon call at the bank or market, an evening stroll. The errand
+# machinery does all the walking; the plan only decides what and when.
+RoutineEnabled=true
+# Chance (0..1) a fresh day-plan also fires ONE fail-open LLM call naming a
+# small private "intention" for the day (rides the chat prompt + journal).
+RoutineLlmChance=0.35
+#
+# ----- Town gossip (P11/P12) -----
+# When on, each town keeps a small rumor board: salient player lines, player
+# deaths, notable kills (fame-gated), Overseer banishments, and word carried in
+# by journeying NPCs (who ferry each board's freshest talk between towns). The
+# board rides the chat and chatter prompts — zero extra LLM calls — and
+# persists with world saves. Boards are capped and rumors expire (~20h).
+GossipEnabled=true
+# Chance (0..1) a salient player utterance enters the town's talk.
+GossipChance=0.2

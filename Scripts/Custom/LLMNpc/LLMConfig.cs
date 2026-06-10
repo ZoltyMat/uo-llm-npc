@@ -28,8 +28,10 @@ namespace Server.Custom.LLMNpc
         // How many prior (player, npc) exchanges to replay as context.
         public static int MaxMemoryTurns = 6;
 
-        // Tiles within which an NPC "hears" speech directed near it.
-        public static int HearRange = 4;
+        // Tiles within which an NPC "hears" speech directed near it. Set near a
+        // client's view radius so NPCs (and hostile mobs) you can see on screen will
+        // answer, not only ones right on top of you. Closest eligible NPC replies.
+        public static int HearRange = 12;
 
         // Hard cap on the reply length actually spoken in-world.
         public static int MaxReplyChars = 240;
@@ -117,6 +119,28 @@ namespace Server.Custom.LLMNpc
         // Probability that a given heartbeat even looks for a pair to start an
         // exchange. The shard-wide and per-NPC cooldowns space them out further.
         public static double ChatterChance = 0.2;
+
+        // ----- P10: daily routines -------------------------------------------
+        // When on, an idle NPC consults a vocation-shaped plan for the current
+        // game day (a UO day ~= 2 real hours) before rolling random errands: a
+        // morning task, a midday meal at the ACTUAL tavern, an afternoon call at
+        // the bank or market, an evening stroll. Legs anchor to real NPCs found
+        // near the post; the existing errand machinery does all the walking.
+        public static bool RoutineEnabled = false;
+
+        // Chance [0..1] that a fresh day-plan also fires ONE fail-open LLM call
+        // naming a small private intention for the day (rides chat + journal).
+        public static double RoutineLlmChance = 0.35;
+
+        // ----- P11/P12: town gossip ------------------------------------------
+        // When on, each town keeps a small rumor board: salient player lines,
+        // player deaths, notable kills, anomaly banishments, and word carried in
+        // by journeying NPCs. Boards ride chat/chatter prompts (no extra LLM
+        // calls) and persist with LLMAmbientMemory.
+        public static bool GossipEnabled = false;
+
+        // Chance [0..1] that a salient player utterance enters the town's talk.
+        public static double GossipChance = 0.2;
 
         // ----- P9: rare 4th-wall / anomaly events ---------------------------
         // When on, an NPC near a watching player can VERY rarely crack — realize
@@ -301,6 +325,18 @@ namespace Server.Custom.LLMNpc
                 case "chatterchance":
                     ChatterChance = ParseDouble(val, ChatterChance);
                     break;
+                case "routineenabled":
+                    RoutineEnabled = ParseBool(val, RoutineEnabled);
+                    break;
+                case "routinellmchance":
+                    RoutineLlmChance = ParseDouble(val, RoutineLlmChance);
+                    break;
+                case "gossipenabled":
+                    GossipEnabled = ParseBool(val, GossipEnabled);
+                    break;
+                case "gossipchance":
+                    GossipChance = ParseDouble(val, GossipChance);
+                    break;
                 case "anomalyenabled":
                     AnomalyEnabled = ParseBool(val, AnomalyEnabled);
                     break;
@@ -384,7 +420,7 @@ namespace Server.Custom.LLMNpc
                     w.WriteLine("# Conversation turns of memory replayed per (player, npc) pair.");
                     w.WriteLine("MaxMemoryTurns=6");
                     w.WriteLine("# Tiles within which an NPC hears nearby speech.");
-                    w.WriteLine("HearRange=4");
+                    w.WriteLine("HearRange=12");
                     w.WriteLine("# Hard cap on spoken reply length.");
                     w.WriteLine("MaxReplyChars=240");
                     w.WriteLine("#");
@@ -447,6 +483,22 @@ namespace Server.Custom.LLMNpc
                     w.WriteLine("ChatterEnabled=false");
                     w.WriteLine("# Chance [0..1] that a heartbeat even looks for a pair to start one.");
                     w.WriteLine("ChatterChance=0.2");
+                    w.WriteLine("#");
+                    w.WriteLine("# ----- P10: daily routines -----");
+                    w.WriteLine("# When on, idle NPCs follow a vocation-shaped plan for each game day");
+                    w.WriteLine("# (morning task, midday meal at the actual tavern, afternoon bank or");
+                    w.WriteLine("# market call, evening stroll) before rolling random errands.");
+                    w.WriteLine("RoutineEnabled=false");
+                    w.WriteLine("# Chance [0..1] a fresh day-plan also names an LLM 'intention'.");
+                    w.WriteLine("RoutineLlmChance=0.35");
+                    w.WriteLine("#");
+                    w.WriteLine("# ----- P11/P12: town gossip -----");
+                    w.WriteLine("# When on, each town keeps a rumor board (player talk, deaths, notable");
+                    w.WriteLine("# kills, banishments, word carried by journeyers) that rides the chat");
+                    w.WriteLine("# and chatter prompts. No extra LLM calls; persists with world saves.");
+                    w.WriteLine("GossipEnabled=false");
+                    w.WriteLine("# Chance [0..1] a salient player utterance enters the town's talk.");
+                    w.WriteLine("GossipChance=0.2");
                     w.WriteLine("#");
                     w.WriteLine("# ----- P9: rare 4th-wall / anomaly events -----");
                     w.WriteLine("# When on, an NPC near a watching player can VERY rarely crack: realize");

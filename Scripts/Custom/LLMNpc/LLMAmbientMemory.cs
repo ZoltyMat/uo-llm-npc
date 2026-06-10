@@ -260,7 +260,7 @@ namespace Server.Custom.LLMNpc
         {
             base.Serialize(writer);
 
-            writer.Write((int)1); // version (1 adds errands + journals)
+            writer.Write((int)2); // version (1 adds errands + journals; 2 adds town gossip)
 
             writer.Write(m_Identities.Count);
             foreach (KeyValuePair<int, NpcIdentity> kv in m_Identities)
@@ -300,6 +300,9 @@ namespace Server.Custom.LLMNpc
                 for (int i = 0; i < kv.Value.Count; i++)
                     writer.Write(kv.Value[i] == null ? "" : kv.Value[i]);
             }
+
+            // v2: per-town gossip boards (P11/P12) ride the same save.
+            TownGossip.Serialize(writer);
         }
 
         public override void Deserialize(GenericReader reader)
@@ -365,6 +368,9 @@ namespace Server.Custom.LLMNpc
                     m_Journals[npcSerial] = log;
                 }
             }
+
+            if (version >= 2)
+                TownGossip.Deserialize(reader);
         }
     }
 }

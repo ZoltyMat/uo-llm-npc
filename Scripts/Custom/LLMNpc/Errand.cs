@@ -35,6 +35,16 @@ namespace Server.Custom.LLMNpc
         // then recalls home — so a journey lives only in the Dwelling state.
         public bool Journey;
 
+        // The named destination city of a journey (e.g. "Vesper"), so the return
+        // leg knows which town's gossip board the NPC carries home (P11).
+        public string JourneyCity;
+
+        // Dwell window override in seconds for routine legs (P10) — a tavern
+        // lunch lingers longer than a market stop. 0 means the default 20-60s.
+        // Runtime-only: a reboot mid-errand just falls back to the default.
+        public int DwellMinSec;
+        public int DwellMaxSec;
+
         public DateTime StartedUtc;       // when the current errand began
         public DateTime DwellUntilUtc;    // while Dwelling, when to start heading back
         public DateTime PhaseDeadlineUtc; // hard cap on a travel phase (force-complete past this)
@@ -57,7 +67,7 @@ namespace Server.Custom.LLMNpc
 
         public void Serialize(GenericWriter writer)
         {
-            writer.Write((int)1); // errand version (1 adds Journey)
+            writer.Write((int)2); // errand version (1 adds Journey; 2 adds JourneyCity)
 
             writer.Write((int)State);
             writer.Write(Kind == null ? "" : Kind);
@@ -72,6 +82,8 @@ namespace Server.Custom.LLMNpc
             writer.Write(NextDecisionUtc);
 
             writer.Write(Journey);
+
+            writer.Write(JourneyCity == null ? "" : JourneyCity); // v2
         }
 
         public void Deserialize(GenericReader reader)
@@ -92,6 +104,8 @@ namespace Server.Custom.LLMNpc
 
             // v0 saves (the deployed P1 image) carried no Journey flag.
             Journey = (v >= 1) && reader.ReadBool();
+
+            JourneyCity = (v >= 2) ? reader.ReadString() : "";
 
             // Runtime-only fields are not persisted; start the stuck clock fresh.
             LastPos = Point3D.Zero;
