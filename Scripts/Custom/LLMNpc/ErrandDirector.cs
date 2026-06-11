@@ -60,6 +60,19 @@ namespace Server.Custom.LLMNpc
         // so there is no walking phase to drive — only the dwell timer matters.
         private const double JourneyChance = 0.04;
         private static readonly TimeSpan CooldownJourney = TimeSpan.FromMinutes(20.0);
+
+        // P16 denizen pacing — the crowd hustles: more errands, more journeys,
+        // shorter rests. (Their LLM flourishes are throttled instead — see the
+        // DenizenLlmScale uses — so a packed street stays cheap.)
+        private const double DenizenStartChance = 0.7;
+        private const double DenizenJourneyChance = 0.12;
+        private static readonly TimeSpan DenizenCooldown = TimeSpan.FromSeconds(75.0);
+        private static readonly TimeSpan DenizenCooldownJourney = TimeSpan.FromMinutes(8.0);
+
+        // Crowd throttle on optional LLM calls (P4 rewrites, dawn intentions):
+        // one rooted villager rolling at full chance is charm; two hundred
+        // denizens doing it is a stampede.
+        public const double DenizenLlmScale = 0.15;
         private const int DwellAbroadMin = 180; // seconds (3 min)
         private const int DwellAbroadMax = 480; // seconds (8 min)
 
@@ -117,8 +130,11 @@ namespace Server.Custom.LLMNpc
                         continue;
 
                     // The first plain townsperson in range doubles as this
-                    // player's potential P13 observer — the one who "noticed" them.
+                    // player's potential P13 observer — the one who "noticed"
+                    // them — and the nearest denizen as their P16 greeter.
                     BaseCreature observer = null;
+                    LLMDenizen greeter = null;
+                    double greeterDist = double.MaxValue;
 
                     IPooledEnumerable eable = map.GetMobilesInRange(player.Location, SimRange);
 
@@ -131,6 +147,17 @@ namespace Server.Custom.LLMNpc
                         if (observer == null && bc.Body.IsHuman && bc.Karma >= 0 &&
                             !bc.Controlled && !bc.Summoned && !(bc is LLMOverseer))
                             observer = bc;
+
+                        LLMDenizen den = bc as LLMDenizen;
+                        if (den != null && den.Alive)
+                        {
+                            double dd = player.GetDistanceToSqrt(den);
+                            if (dd < greeterDist)
+                            {
+                                greeterDist = dd;
+                                greeter = den;
+                            }
+                        }
 
                         // Stationary NPCs never roam on their own, but a GM force
                         // (ErrandGo/ErrandTrip) sets an errand on one regardless of
@@ -150,6 +177,11 @@ namespace Server.Custom.LLMNpc
                     // Heavily cooldown-gated inside; deterministic; no LLM call.
                     if (observer != null)
                         TownGossip.MaybeObservePlayer(player, observer, now);
+
+                    // P16: the nearest denizen may hail the passer-by (or gawk
+                    // at a keeper of the realm). Cooldown-gated inside.
+                    if (greeter != null)
+                        DenizenDirector.MaybeGreet(player, greeter, now);
                 }
 
                 foreach (BaseCreature bc in seen)
@@ -251,15 +283,21 @@ namespace Server.Custom.LLMNpc
             if (DailyRoutine.TryStartLeg(npc, e, now, cls))
                 return;
 
+            // P16: denizens are the bustle — they set off far more often and
+            // travel the realm far more freely than the rooted townsfolk.
+            bool denizen = npc is LLMDenizen;
+
             // Only true Roamers take cross-continent trips, and only rarely. Rolled
             // before the local-errand chance so a journey can pre-empt a local errand.
-            if (cls == MobilityClass.Roamer && Utility.RandomDouble() < JourneyChance)
+            if (cls == MobilityClass.Roamer &&
+                Utility.RandomDouble() < (denizen ? DenizenJourneyChance : JourneyChance))
             {
                 StartJourney(npc, e, now);
                 return;
             }
 
-            double chance = cls == MobilityClass.Roamer ? StartChanceRoam : StartChanceLocal;
+            double chance = denizen ? DenizenStartChance
+                : (cls == MobilityClass.Roamer ? StartChanceRoam : StartChanceLocal);
 
             if (Utility.RandomDouble() >= chance)
                 return;
@@ -367,11 +405,19 @@ namespace Server.Custom.LLMNpc
         {
             // Home/RangeHome were already restored when the return phase began, so a
             // deadline-forced completion still leaves the NPC homing on its post.
-            string town = BritanniaGeography.TownOf(npc);
-            LLMAmbientMemory.AppendJournal(npc.Serial.Value, e.Kind + " (" + town + ")");
+            // Denizens journal only a sample of their many errands — their bustle
+            // would otherwise flood the embed pipeline and the journal collection.
+            bool denizen = npc is LLMDenizen;
+
+            if (!denizen || Utility.RandomDouble() < 0.25)
+            {
+                string town = BritanniaGeography.TownOf(npc);
+                LLMAmbientMemory.AppendJournal(npc.Serial.Value, e.Kind + " (" + town + ")");
+            }
 
             MobilityClass cls = ErrandPolicy.Classify(npc);
-            TimeSpan cooldown = cls == MobilityClass.Roamer ? CooldownRoam : CooldownLocal;
+            TimeSpan cooldown = denizen ? DenizenCooldown
+                : (cls == MobilityClass.Roamer ? CooldownRoam : CooldownLocal);
 
             e.State = ErrandState.None;
             e.Kind = "";
@@ -445,7 +491,7 @@ namespace Server.Custom.LLMNpc
             e.Journey = false;
             e.JourneyCity = "";
             e.Kind = "";
-            e.NextDecisionUtc = now.Add(CooldownJourney);
+            e.NextDecisionUtc = now.Add(npc is LLMDenizen ? DenizenCooldownJourney : CooldownJourney);
 
             m_Journeys.Remove(npc.Serial.Value);
         }
@@ -486,7 +532,11 @@ namespace Server.Custom.LLMNpc
             if (npc == null || npc.Deleted || e == null)
                 return;
 
-            if (Utility.RandomDouble() >= LLMConfig.ErrandLlmChance)
+            double refineChance = LLMConfig.ErrandLlmChance;
+            if (npc is LLMDenizen)
+                refineChance *= DenizenLlmScale; // crowd throttle
+
+            if (Utility.RandomDouble() >= refineChance)
                 return;
 
             NpcIdentity id = LLMAmbientSpeech.EnsureIdentity(npc);

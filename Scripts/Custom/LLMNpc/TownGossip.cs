@@ -556,6 +556,47 @@ namespace Server.Custom.LLMNpc
             return candidates[Utility.Random(candidates.Count)];
         }
 
+        // A short, neutral, prompt-ready impression of a player for the P16
+        // greeting/chatter lanes — what a stranger in the street would notice
+        // at a glance. "" when nothing stands out.
+        public static string ObservationHint(Mobile player)
+        {
+            if (player == null || player.Deleted)
+                return "";
+
+            try
+            {
+                Item held = player.FindItemOnLayer(Layer.OneHanded);
+                if (held == null || !(held is BaseWeapon))
+                    held = player.FindItemOnLayer(Layer.TwoHanded);
+
+                if (held is BaseWeapon)
+                    return "They carry a " + WeaponKind((BaseWeapon)held) + ".";
+
+                if (player.Karma <= -2500)
+                    return "They have a dark reputation in these parts.";
+
+                if (player.Karma >= 5000)
+                    return "They are known for their virtue.";
+
+                string skill = BestGrandmasterSkill(player);
+                if (skill != null)
+                    return "They are said to be a grandmaster of " + skill + ".";
+
+                if (player.Fame >= 10000)
+                    return "Their name travels ahead of them.";
+
+                Item chest = player.FindItemOnLayer(Layer.InnerTorso);
+                if (chest != null && chest.GetType().Name.IndexOf("Plate", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return "They go about in heavy plate.";
+            }
+            catch
+            {
+            }
+
+            return "";
+        }
+
         // The player's highest skill at or past grandmaster (100.0), as a
         // lowercase friendly name, or null if they have none.
         private static string BestGrandmasterSkill(Mobile player)

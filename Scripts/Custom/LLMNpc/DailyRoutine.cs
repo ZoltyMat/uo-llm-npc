@@ -352,7 +352,11 @@ namespace Server.Custom.LLMNpc
         // prompt and the journal; a miss simply means a day with no stated aim.
         private static void MaybeRollIntention(BaseCreature npc, DayPlan plan)
         {
-            if (!LLMConfig.Enabled || Utility.RandomDouble() >= LLMConfig.RoutineLlmChance)
+            double chance = LLMConfig.RoutineLlmChance;
+            if (npc is LLMDenizen)
+                chance *= ErrandDirector.DenizenLlmScale; // crowd throttle (P16)
+
+            if (!LLMConfig.Enabled || Utility.RandomDouble() >= chance)
                 return;
 
             NpcIdentity id = LLMAmbientSpeech.EnsureIdentity(npc);

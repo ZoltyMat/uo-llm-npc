@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using Server;
 using Server.Mobiles;
+using Server.Network;
 
 namespace Server.Custom.LLMNpc
 {
@@ -38,8 +39,17 @@ namespace Server.Custom.LLMNpc
         // At most one exchange begins this often shard-wide, and a given NPC sits
         // out this long after taking part. Both reserved up front (before the async
         // call), so a slow or failed model call still spaces out the next attempt.
-        private static readonly TimeSpan GlobalCooldown = TimeSpan.FromSeconds(45.0);
+        // (Global dropped 45s→30s with P16: denizen crowds should murmur busier.)
+        private static readonly TimeSpan GlobalCooldown = TimeSpan.FromSeconds(30.0);
         private static readonly TimeSpan NpcCooldown = TimeSpan.FromMinutes(4.0);
+
+        // P16: denizens rejoin the murmur sooner than the rooted townsfolk.
+        private static readonly TimeSpan DenizenCooldown = TimeSpan.FromMinutes(2.0);
+
+        // When a denizen is party to an exchange and a player stands in sight,
+        // this often the opener is ABOUT the passer-by.
+        private const double RemarkChance = 0.5;
+        private const int RemarkRange = 12;
 
         private static DateTime m_NextGlobalUtc = DateTime.MinValue;
         private static readonly Dictionary<int, DateTime> m_NextNpcUtc = new Dictionary<int, DateTime>();
@@ -166,8 +176,8 @@ namespace Server.Custom.LLMNpc
             // Reserve the global slot and both NPCs immediately — fail-open: we
             // never retry this pair on this beat, so a stuck call can't busy-loop.
             m_NextGlobalUtc = now.Add(GlobalCooldown);
-            m_NextNpcUtc[a.Serial.Value] = now.Add(NpcCooldown);
-            m_NextNpcUtc[b.Serial.Value] = now.Add(NpcCooldown);
+            m_NextNpcUtc[a.Serial.Value] = now.Add(a is LLMDenizen ? DenizenCooldown : NpcCooldown);
+            m_NextNpcUtc[b.Serial.Value] = now.Add(b is LLMDenizen ? DenizenCooldown : NpcCooldown);
 
             int sa = a.Serial.Value;
             int sb = b.Serial.Value;
@@ -181,6 +191,15 @@ namespace Server.Custom.LLMNpc
             string recapBofA = RecapText(sb, sa);
 
             string sysA = BuildChatterPrompt(a, idA, b, idB, recapAofB, true);
+
+            // P16: when a denizen is in the pair and a traveler stands in sight,
+            // the opener may be ABOUT them — the crowd talks about who passes.
+            if ((a is LLMDenizen || b is LLMDenizen) && Utility.RandomDouble() < RemarkChance)
+            {
+                string remark = RemarkAbout(a);
+                if (remark.Length > 0)
+                    sysA += remark;
+            }
 
             List<LLMMessage> openMsgs = new List<LLMMessage>();
             openMsgs.Add(new LLMMessage("user", "Speak a brief, in-character line to them now."));
@@ -247,6 +266,51 @@ namespace Server.Custom.LLMNpc
         {
             NpcRelationship rel = LLMAmbientMemory.GetRelationship(selfSerial, otherSerial);
             return rel == null ? "" : rel.Recap();
+        }
+
+        // A prompt fragment pointing the opener at the nearest visible player —
+        // "look at that one with the katana" — or "" when no one is passing.
+        // Keepers of the realm (staff) draw hushed awe instead of street talk.
+        private static string RemarkAbout(BaseCreature speaker)
+        {
+            Mobile player = null;
+            double best = double.MaxValue;
+
+            IPooledEnumerable eable = speaker.Map.GetClientsInRange(speaker.Location, RemarkRange);
+
+            foreach (NetState ns in eable)
+            {
+                Mobile m = ns == null ? null : ns.Mobile;
+                if (m == null || m.Deleted || !m.Player || !m.Alive)
+                    continue;
+
+                double d = speaker.GetDistanceToSqrt(m);
+                if (d < best)
+                {
+                    best = d;
+                    player = m;
+                }
+            }
+
+            eable.Free();
+
+            if (player == null)
+                return "";
+
+            string name = string.IsNullOrEmpty(player.Name) ? "a stranger" : player.Name;
+
+            if (player.AccessLevel > AccessLevel.Player)
+            {
+                return " You can both see " + name + " nearby — and there is something uncanny about them, " +
+                       "as though the realm itself bends around their steps. You might whisper of it to your " +
+                       "fellow, awed or uneasy, without naming what they are.";
+            }
+
+            string hint = TownGossip.ObservationHint(player);
+
+            return " You can both see a traveler named " + name + " in the street." +
+                   (hint.Length > 0 ? " " + hint : "") +
+                   " You might remark on them to your fellow if it suits the moment.";
         }
 
         // System prompt for one side of an ambient exchange. Mirrors the chat

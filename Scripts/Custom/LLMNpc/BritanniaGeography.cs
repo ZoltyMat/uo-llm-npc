@@ -88,6 +88,17 @@ namespace Server.Custom.LLMNpc
             return nearest != null ? nearest : "Britannia";
         }
 
+        // All classic city names, for the P16 denizen population director.
+        public static string[] CityNames()
+        {
+            string[] names = new string[m_Cities.Length];
+
+            for (int i = 0; i < m_Cities.Length; i++)
+                names[i] = m_Cities[i].Name;
+
+            return names;
+        }
+
         // Center coordinates of a named city, for distance math (P15 favor
         // rewards scale with how far the parcel must travel). False for names
         // that aren't classic cities (regions, "Britannia").

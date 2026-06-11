@@ -34,6 +34,16 @@ namespace Server.Custom.LLMNpc
             CommandSystem.Register("OverseerTest", AccessLevel.GameMaster, new CommandEventHandler(OverseerTest_OnCommand));
             CommandSystem.Register("FavorTest", AccessLevel.GameMaster, new CommandEventHandler(FavorTest_OnCommand));
             CommandSystem.Register("FavorDeliver", AccessLevel.GameMaster, new CommandEventHandler(FavorDeliver_OnCommand));
+            CommandSystem.Register("DenizenStatus", AccessLevel.GameMaster, new CommandEventHandler(DenizenStatus_OnCommand));
+        }
+
+        [Usage("DenizenStatus")]
+        [Description("Shows the P16 denizen population per city versus the configured target.")]
+        public static void DenizenStatus_OnCommand(CommandEventArgs e)
+        {
+            List<string> lines = DenizenDirector.StatusLines();
+            for (int i = 0; i < lines.Count; i++)
+                e.Mobile.SendMessage(i == 0 ? 0x40 : 0x35, lines[i]);
         }
 
         [Usage("FavorTest")]

@@ -142,6 +142,19 @@ namespace Server.Custom.LLMNpc
         // Chance [0..1] that a salient player utterance enters the town's talk.
         public static double GossipChance = 0.2;
 
+        // ----- P16: denizens — the ambient crowd -------------------------------
+        // When on, a maintenance director keeps every classic city populated to
+        // DenizenPerCity with LLMDenizen street folk: full talking NPCs with
+        // rolled trades who errand and journey far more often than the rooted
+        // townsfolk, hail passing players (and gawk at GMs), and gossip with
+        // each other about whoever walks by. Off-screen denizens cost nothing;
+        // their optional LLM flourishes are throttled so crowds stay cheap.
+        public static bool DenizenEnabled = false;
+
+        // Target headcount per classic city. The director spawns in batches and
+        // tops the count back up as denizens die or are deleted.
+        public static int DenizenPerCity = 200;
+
         // ----- P15: favors — NPC-given delivery errands -----------------------
         // When on, an eligible townsperson chatting with a player may offer a
         // sealed parcel bound for the banker/smith/tavernkeeper of another (or
@@ -350,6 +363,12 @@ namespace Server.Custom.LLMNpc
                 case "gossipchance":
                     GossipChance = ParseDouble(val, GossipChance);
                     break;
+                case "denizenenabled":
+                    DenizenEnabled = ParseBool(val, DenizenEnabled);
+                    break;
+                case "denizenpercity":
+                    DenizenPerCity = ParseInt(val, DenizenPerCity);
+                    break;
                 case "favorenabled":
                     FavorEnabled = ParseBool(val, FavorEnabled);
                     break;
@@ -518,6 +537,14 @@ namespace Server.Custom.LLMNpc
                     w.WriteLine("GossipEnabled=false");
                     w.WriteLine("# Chance [0..1] a salient player utterance enters the town's talk.");
                     w.WriteLine("GossipChance=0.2");
+                    w.WriteLine("#");
+                    w.WriteLine("# ----- P16: denizens — the ambient crowd -----");
+                    w.WriteLine("# When on, every classic city is kept populated with LLMDenizen street");
+                    w.WriteLine("# folk who errand/journey often, hail passing players, and gossip about");
+                    w.WriteLine("# whoever walks by. Off-screen denizens cost nothing.");
+                    w.WriteLine("DenizenEnabled=false");
+                    w.WriteLine("# Target headcount per classic city (16 cities).");
+                    w.WriteLine("DenizenPerCity=200");
                     w.WriteLine("#");
                     w.WriteLine("# ----- P15: favors — NPC-given delivery errands -----");
                     w.WriteLine("# When on, townsfolk may entrust players with sealed parcels for the");

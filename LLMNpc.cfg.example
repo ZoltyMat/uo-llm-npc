@@ -129,3 +129,14 @@ GossipChance=0.2
 FavorEnabled=true
 # Chance (0..1) an eligible chat rolls a pending offer.
 FavorChance=0.2
+#
+# ----- Denizens: the ambient crowd (P16) -----
+# When on, a maintenance director keeps every classic city populated to
+# DenizenPerCity with LLMDenizen street folk — full talking NPCs with rolled
+# trades (fisherman, peddler, lamplighter...) who errand and journey far more
+# often than the rooted townsfolk, hail passing players in the street (and
+# gawk at GMs), and gossip with each other about whoever walks by. Off-screen
+# denizens cost nothing; crowd LLM flourishes are rate-throttled.
+DenizenEnabled=true
+# Target headcount per classic city (16 cities).
+DenizenPerCity=200
