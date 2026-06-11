@@ -117,3 +117,15 @@ RoutineLlmChance=0.35
 GossipEnabled=true
 # Chance (0..1) a salient player utterance enters the town's talk.
 GossipChance=0.2
+#
+# ----- Favors: NPC-given delivery errands (P15) -----
+# When on, an eligible townsperson chatting with a player may entrust them
+# with a sealed parcel for the banker/smith/tavernkeeper of another (or the
+# same) town. Destination, reward (distance-scaled gold), karma, and the
+# cooldowns are all deterministic; the LLM only chooses the social moment via
+# a [do:offer] tag. Delivery also boards praise rumors on both towns, so
+# carrying favors is how a traveler builds the reputation townsfolk gossip
+# about. Asking an NPC for work guarantees an offer when one is pending.
+FavorEnabled=true
+# Chance (0..1) an eligible chat rolls a pending offer.
+FavorChance=0.2

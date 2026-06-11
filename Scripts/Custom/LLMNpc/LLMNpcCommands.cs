@@ -32,6 +32,73 @@ namespace Server.Custom.LLMNpc
             CommandSystem.Register("RoutineNow", AccessLevel.GameMaster, new CommandEventHandler(RoutineNow_OnCommand));
             CommandSystem.Register("ObserveTest", AccessLevel.GameMaster, new CommandEventHandler(ObserveTest_OnCommand));
             CommandSystem.Register("OverseerTest", AccessLevel.GameMaster, new CommandEventHandler(OverseerTest_OnCommand));
+            CommandSystem.Register("FavorTest", AccessLevel.GameMaster, new CommandEventHandler(FavorTest_OnCommand));
+            CommandSystem.Register("FavorDeliver", AccessLevel.GameMaster, new CommandEventHandler(FavorDeliver_OnCommand));
+        }
+
+        [Usage("FavorTest")]
+        [Description("Target an NPC to force a pending parcel-favor it can offer YOU (P15) — then ask it for work.")]
+        public static void FavorTest_OnCommand(CommandEventArgs e)
+        {
+            e.Mobile.SendMessage(0x35, "Target the NPC that should offer you a favor.");
+            e.Mobile.Target = new FavorTarget(false);
+        }
+
+        [Usage("FavorDeliver")]
+        [Description("Target an NPC to deliver the first parcel in your pack to it (P15 testing — same validation as double-click).")]
+        public static void FavorDeliver_OnCommand(CommandEventArgs e)
+        {
+            e.Mobile.SendMessage(0x35, "Target the recipient.");
+            e.Mobile.Target = new FavorTarget(true);
+        }
+
+        private class FavorTarget : Target
+        {
+            private readonly bool m_Deliver;
+
+            public FavorTarget(bool deliver)
+                : base(12, false, TargetFlags.None)
+            {
+                m_Deliver = deliver;
+            }
+
+            protected override void OnTarget(Mobile from, object targeted)
+            {
+                Mobile m = targeted as Mobile;
+
+                if (m == null)
+                {
+                    from.SendMessage(0x22, "That is not a mobile.");
+                    return;
+                }
+
+                if (!m_Deliver)
+                {
+                    string spec = FavorDirector.ForcePending(m, from);
+                    from.SendMessage(0x40, "{0} now has a favor to offer you: a parcel for the {1}. Ask them for work.", m.Name, spec);
+                    return;
+                }
+
+                FavorParcel parcel = null;
+                if (from.Backpack != null)
+                {
+                    System.Collections.Generic.List<Item> items = from.Backpack.Items;
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        parcel = items[i] as FavorParcel;
+                        if (parcel != null)
+                            break;
+                    }
+                }
+
+                if (parcel == null)
+                {
+                    from.SendMessage(0x22, "You carry no parcel.");
+                    return;
+                }
+
+                FavorDirector.TryDeliver(parcel, from, m);
+            }
         }
 
         [Usage("ObserveTest")]

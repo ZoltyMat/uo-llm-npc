@@ -217,6 +217,9 @@ namespace Server.Mobiles
 
                 sb.Append(TownGossip.PromptBlock(id != null && !string.IsNullOrEmpty(id.Town)
                     ? id.Town : BritanniaGeography.TownOf(this)));
+
+                // P15: an open parcel-favor this NPC could offer the traveler.
+                sb.Append(FavorDirector.PromptBlock(this.Serial.Value, player.Serial.Value));
             }
 
             // P7/P14: the (closed) action vocabulary — cosmetic gestures for
@@ -235,12 +238,29 @@ namespace Server.Mobiles
 
         protected virtual string ExtractAction(string reply, out string verb)
         {
-            return NpcActions.Extract(reply, out verb);
+            return NpcActions.Extract(reply, FavorDirector.OfferVerbs, out verb);
         }
 
         protected virtual void PerformAction(Mobile player, string verb)
         {
-            NpcActions.Perform(this, verb);
+            // A pending favor's [do:offer] takes precedence (P15); anything
+            // else falls through to the cosmetic gestures.
+            if (!FavorDirector.TryPerformOffer(this, player, verb))
+                NpcActions.Perform(this, verb);
+        }
+
+        // P15: a delivered favor raises this NPC's regard for the courier —
+        // even when the delivery happened a continent away.
+        public void RecordFavor(Mobile player)
+        {
+            if (player == null)
+                return;
+
+            NpcRelationship rel = GetOrCreateRelationship(player);
+
+            rel.Disposition += 15;
+            if (rel.Disposition > 100)
+                rel.Disposition = 100;
         }
 
         protected virtual void Respond(Mobile player, string text)
@@ -262,7 +282,13 @@ namespace Server.Mobiles
             // P11: a salient line told to a townsperson may enter the town's talk
             // (chance-gated inside). Monsters don't carry civic gossip.
             if (!IsMonsterSpeaker)
+            {
                 TownGossip.MaybeAddPlayerRumor(this, player, text);
+
+                // P15: an eligible townsperson may roll a parcel-favor to offer
+                // (gated inside; asking for work guarantees it).
+                FavorDirector.MaybeCreatePending(this, player, text);
+            }
 
             string key = npcSerial.ToString();
             string archetype = (m_Identity != null) ? m_Identity.Archetype : "";

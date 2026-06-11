@@ -88,6 +88,28 @@ namespace Server.Custom.LLMNpc
             return nearest != null ? nearest : "Britannia";
         }
 
+        // Center coordinates of a named city, for distance math (P15 favor
+        // rewards scale with how far the parcel must travel). False for names
+        // that aren't classic cities (regions, "Britannia").
+        public static bool TryGetCityCenter(string name, out Point3D center)
+        {
+            center = Point3D.Zero;
+
+            if (string.IsNullOrEmpty(name))
+                return false;
+
+            for (int i = 0; i < m_Cities.Length; i++)
+            {
+                if (m_Cities[i].Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    center = new Point3D(m_Cities[i].X, m_Cities[i].Y, 0);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         // A random named city, optionally excluding one (used to give an NPC an
         // origin town that differs from where they now hold their post).
         public static string RandomCityExcept(string except)

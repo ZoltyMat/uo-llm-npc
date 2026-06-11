@@ -165,6 +165,11 @@ namespace Server.Custom.LLMNpc
             // where chatter and journeying NPCs can spread it.
             TownGossip.MaybeAddPlayerRumor(npc, player, text);
 
+            // P15: an eligible townsperson may roll a parcel-favor to offer this
+            // player (heavily gated inside; asking for work guarantees it). Done
+            // BEFORE the prompt is built so the offer can ride this very reply.
+            FavorDirector.MaybeCreatePending(npc, player, text);
+
             string key = npcSerial.ToString();
             string archetype = id != null ? id.Archetype : "";
             string region = id != null ? id.Town : "";
@@ -180,9 +185,10 @@ namespace Server.Custom.LLMNpc
                     return;
 
                 // The LLM may end its reply with a [do:VERB] action tag; strip it
-                // from the spoken line and run it as a safe cosmetic gesture.
+                // from the spoken line and run it as a safe cosmetic gesture —
+                // or, when a pending favor exists, the [do:offer] hand-over (P15).
                 string verb;
-                string spoken = NpcActions.Extract(reply, out verb);
+                string spoken = NpcActions.Extract(reply, FavorDirector.OfferVerbs, out verb);
 
                 LLMConversation.Record(npcSerial, playerSerial, "user", text);
                 LLMConversation.Record(npcSerial, playerSerial, "assistant", spoken);
@@ -190,7 +196,8 @@ namespace Server.Custom.LLMNpc
                 if (spoken.Length > 0)
                     mob.Say(spoken);
 
-                NpcActions.Perform(mob, verb);
+                if (!FavorDirector.TryPerformOffer(mob, player, verb))
+                    NpcActions.Perform(mob, verb);
             });
         }
 
@@ -493,6 +500,9 @@ namespace Server.Custom.LLMNpc
             // P11/P12: the talk of the town, sharable when conversation invites it.
             sb.Append(TownGossip.PromptBlock(id != null && !string.IsNullOrEmpty(id.Town)
                 ? id.Town : BritanniaGeography.TownOf(npc)));
+
+            // P15: an open parcel-favor this NPC could offer the traveler.
+            sb.Append(FavorDirector.PromptBlock(npc.Serial.Value, player.Serial.Value));
 
             sb.Append(NpcActions.PromptInstruction());
 

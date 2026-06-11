@@ -10,8 +10,11 @@ the war and a town he hails from. Two townsfolk hold a murmured conversation
 when you wander past. NPCs keep daily routines — a morning task, a midday
 meal at the actual tavern — and towns keep rumor boards: what players say,
 who slew what, who walks around in grandmaster plate, all of it carried
-between cities by traveling NPCs. Beg the realm's Overseer for a weapon and
-it will deflect you; earn one, and the gift always carries a hidden price.
+between cities by traveling NPCs. A villager who cannot
+leave their post may entrust you with a sealed parcel for the banker of a
+distant town — deliver it and both towns talk about you. Beg the realm's
+Overseer for a weapon and it will deflect you; earn one, and the gift always
+carries a hidden price.
 And once in a long while, an NPC realizes it is an AI in a game and panics —
 before the world quietly mends itself.
 
@@ -64,6 +67,7 @@ logic with no separate build step. The design rests on a few rules:
 | `TownGossip.cs` | Per-town rumor boards: player talk, deaths, notable kills, banishments, and impressions of players themselves (gear, karma, mastery) — carried between towns by journeying NPCs, surfaced through chat. Zero extra LLM calls. |
 | `OverseerActions.cs` | The Overseer's closed GM-tier verb list: harmless storms, small auto-expiring spawn packs, blessings, gifts, departure — every effect capped and cooldown-gated in code. |
 | `GenieGifts.cs` | The genie rule: any weapon the Overseer grants pairs a real power with a real flaw (it bites its wielder, drains life, or is cursed). The model picks the verb; it cannot mint an unflawed item. |
+| `PlayerFavors.cs` | Favors: townsfolk entrust players with sealed parcel deliveries to real NPCs in real towns — deterministic destination/reward/cooldowns, the LLM only picks the moment via `[do:offer]`. Delivery pays distance-scaled gold, karma, regard, and praise rumors on both towns' boards. |
 | `LLMNpcCommands.cs` | In-game GM/admin commands (`[LLMReload`, diagnostics, toggles). |
 
 ## Requirements
@@ -97,6 +101,7 @@ commented list. Highlights:
 - `ChatterEnabled` — NPC-to-NPC ambient conversation.
 - `RoutineEnabled` — daily routines (a UO day is ~2 real hours).
 - `GossipEnabled` — town rumor boards, cross-town spread, player observation.
+- `FavorEnabled` — NPC-given parcel-delivery favors for players.
 - `AnomalyEnabled` — the rare 4th-wall events.
 - Cooldowns, hear-range, token/length caps — anti-spam and latency control.
 

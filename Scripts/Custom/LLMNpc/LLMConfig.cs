@@ -142,6 +142,19 @@ namespace Server.Custom.LLMNpc
         // Chance [0..1] that a salient player utterance enters the town's talk.
         public static double GossipChance = 0.2;
 
+        // ----- P15: favors — NPC-given delivery errands -----------------------
+        // When on, an eligible townsperson chatting with a player may offer a
+        // sealed parcel bound for the banker/smith/tavernkeeper of another (or
+        // the same) town. The favor itself is deterministic (destination,
+        // reward, cooldowns); the LLM only decides the social moment via a
+        // [do:offer] tag. Delivery pays distance-scaled gold, karma, regard,
+        // and praise rumors on both towns' boards.
+        public static bool FavorEnabled = false;
+
+        // Chance [0..1] an eligible chat rolls an offer. A player who ASKS for
+        // work ("any errands?", "need help?") bypasses the roll entirely.
+        public static double FavorChance = 0.2;
+
         // ----- P9: rare 4th-wall / anomaly events ---------------------------
         // When on, an NPC near a watching player can VERY rarely crack — realize
         // it is an AI in a game and panic (summoning the Overseer, who banishes
@@ -337,6 +350,12 @@ namespace Server.Custom.LLMNpc
                 case "gossipchance":
                     GossipChance = ParseDouble(val, GossipChance);
                     break;
+                case "favorenabled":
+                    FavorEnabled = ParseBool(val, FavorEnabled);
+                    break;
+                case "favorchance":
+                    FavorChance = ParseDouble(val, FavorChance);
+                    break;
                 case "anomalyenabled":
                     AnomalyEnabled = ParseBool(val, AnomalyEnabled);
                     break;
@@ -499,6 +518,14 @@ namespace Server.Custom.LLMNpc
                     w.WriteLine("GossipEnabled=false");
                     w.WriteLine("# Chance [0..1] a salient player utterance enters the town's talk.");
                     w.WriteLine("GossipChance=0.2");
+                    w.WriteLine("#");
+                    w.WriteLine("# ----- P15: favors — NPC-given delivery errands -----");
+                    w.WriteLine("# When on, townsfolk may entrust players with sealed parcels for the");
+                    w.WriteLine("# banker/smith/tavernkeeper of another town. Deterministic destination,");
+                    w.WriteLine("# reward, and cooldowns; the LLM only picks the moment ([do:offer]).");
+                    w.WriteLine("FavorEnabled=false");
+                    w.WriteLine("# Chance [0..1] an eligible chat rolls an offer (asking for work = always).");
+                    w.WriteLine("FavorChance=0.2");
                     w.WriteLine("#");
                     w.WriteLine("# ----- P9: rare 4th-wall / anomaly events -----");
                     w.WriteLine("# When on, an NPC near a watching player can VERY rarely crack: realize");
