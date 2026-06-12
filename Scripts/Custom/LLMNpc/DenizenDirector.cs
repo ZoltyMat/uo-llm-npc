@@ -46,6 +46,12 @@ namespace Server.Custom.LLMNpc
             "washerwoman", "rat-catcher", "lamplighter", "porter"
         };
 
+        // A distinctive non-zero team so wild (team-0) monsters treat denizens as
+        // enemies. Any non-zero value works; picked clear of the low numbers some
+        // event/faction spawners reuse so denizens never accidentally ally with
+        // themed mobs.
+        private const int DenizenTeam = 71;
+
         private string m_Trade;
         private string m_HomeCity;
         private DenizenClass m_Class;
@@ -85,6 +91,18 @@ namespace Server.Custom.LLMNpc
         {
             m_Class = kind;
             SpeechHue = 0x3B2;
+
+            // Put denizens on their own team so wild monsters count them as prey.
+            // RunUO's BaseCreature.IsEnemy treats two uncontrolled creatures on the
+            // SAME team (everything defaults to team 0) as non-enemies — which is
+            // why an ogre will stand peacefully beside an unarmed townsperson. A
+            // non-zero team trips the `t.Team != c.Team` branch so any normal
+            // (team-0, FightMode.Closest-style) monster sees a denizen as a target
+            // and hunts it. This stays one-directional: a denizen's FightMode is
+            // Aggressor, which short-circuits IsEnemy to "not an enemy" BEFORE the
+            // team check, so denizens never initiate on players, pets or each
+            // other — they only fight back once a monster actually strikes them.
+            Team = DenizenTeam;
 
             Female = Utility.RandomBool();
             Body = Female ? 0x191 : 0x190;
@@ -280,6 +298,11 @@ namespace Server.Custom.LLMNpc
 
             if (v >= 1)
                 m_Class = (DenizenClass)reader.ReadInt();
+
+            // Re-assert the denizen team on every load so denizens saved before
+            // the team fix (team 0 = invisible to monster aggro) convert in place
+            // on the next world boot — no [DenizenReset needed.
+            Team = DenizenTeam;
         }
     }
 
