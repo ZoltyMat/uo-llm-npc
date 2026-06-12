@@ -153,7 +153,7 @@ namespace Server.Custom.LLMNpc
 
         // Target headcount per classic city. The director spawns in batches and
         // tops the count back up as denizens die or are deleted.
-        public static int DenizenPerCity = 200;
+        public static int DenizenPerCity = 80;
 
         // ----- P15: favors — NPC-given delivery errands -----------------------
         // When on, an eligible townsperson chatting with a player may offer a
@@ -544,7 +544,7 @@ namespace Server.Custom.LLMNpc
                     w.WriteLine("# whoever walks by. Off-screen denizens cost nothing.");
                     w.WriteLine("DenizenEnabled=false");
                     w.WriteLine("# Target headcount per classic city (16 cities).");
-                    w.WriteLine("DenizenPerCity=200");
+                    w.WriteLine("DenizenPerCity=80");
                     w.WriteLine("#");
                     w.WriteLine("# ----- P15: favors — NPC-given delivery errands -----");
                     w.WriteLine("# When on, townsfolk may entrust players with sealed parcels for the");

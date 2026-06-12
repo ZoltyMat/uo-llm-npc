@@ -26,9 +26,17 @@ namespace Server.Custom.LLMNpc
     {
         public static bool Enabled = true;
 
-        // Heartbeat. 2s is brisk enough that a state transition lands within a tick
-        // of the NPC actually arriving, cheap enough to run every cycle.
-        private static readonly TimeSpan Heartbeat = TimeSpan.FromSeconds(2.0);
+        // Heartbeat. This single shared timer advances every player-visible NPC's
+        // errand state AND fires the directed stall-recovery step. At a coarse 2s
+        // it made crowds shuffle in lockstep — when NPCs block each other (dense
+        // cities) native wander stalls and the only progress is this beat, so every
+        // stuck NPC stepped together every 2s: synchronized and slow. 0.5s matches
+        // the engine's own ~0.4s walk cadence, so directed steps interleave with the
+        // per-NPC (staggered) native movement and the lockstep dissolves into fluid
+        // motion. Cost scales with players x local crowd (not total population), and
+        // every LLM lane is wall-clock-cooldown-gated, so a finer beat adds no model
+        // calls — only cheap scans and short one-step pathfinds.
+        private static readonly TimeSpan Heartbeat = TimeSpan.FromSeconds(0.5);
 
         // How far around each player to consider NPCs "on screen" and worth ticking.
         // Slightly beyond a client's view radius.
@@ -43,8 +51,11 @@ namespace Server.Custom.LLMNpc
         private static readonly TimeSpan TravelDeadline = TimeSpan.FromMinutes(12);
 
         // If the NPC hasn't moved a tile in this long mid-travel, start firing A*
-        // nudges (every heartbeat, until it's moving again — see Progress).
-        private static readonly TimeSpan StuckGrace = TimeSpan.FromSeconds(4.0);
+        // nudges (every heartbeat, until it's moving again — see Progress). Dropped
+        // from 4s: in a crowd an NPC blocked by a neighbor would stand frozen for a
+        // full 4s before the engine routed it around, which reads as paralysis.
+        // 1.5s recovers it before the stall is obvious.
+        private static readonly TimeSpan StuckGrace = TimeSpan.FromSeconds(1.5);
 
         // Idle re-roll cadence and per-class chance of setting off when the window
         // elapses. Cooldown after an errand completes before the next is considered.
@@ -239,6 +250,14 @@ namespace Server.Custom.LLMNpc
             {
                 case ErrandState.None:
                     MaybeStart(npc, e, now);
+
+                    // P17: an idle denizen a player can see roams continuously via
+                    // proper A* pathing (routes around the town's buildings), so it
+                    // is always briskly walking somewhere instead of standing or
+                    // shuffling. Only when MaybeStart didn't just hand it a real
+                    // errand. Off-screen denizens fall through to cheap native wander.
+                    if (npc is LLMDenizen && !HasActiveErrand(npc))
+                        DenizenRoam((LLMDenizen)npc, now);
                     break;
 
                 case ErrandState.Outbound:
@@ -265,6 +284,89 @@ namespace Server.Custom.LLMNpc
                         Progress(npc, e, e.Post, now);
                     break;
             }
+        }
+
+        // P17 continuous roam for a player-visible idle denizen — the SAME proven
+        // mechanic the errand state machine uses: pin Home to a SHORT, reachable
+        // nearby destination (RangeHome 1) and let the engine's native seeking walk
+        // there at full step speed (~2-2.8 tiles/s in the open), firing an A* nudge
+        // only when the denizen wedges on a building. On arrival it immediately
+        // picks the next hop, so it's perpetually walking — never the lazy in-place
+        // wander (which stands still most ticks) and never marching into a wall.
+        // Combat or an active errand suspends roaming.
+        private static void DenizenRoam(LLMDenizen d, DateTime now)
+        {
+            if (d == null || d.Deleted || !d.Alive || d.Map == null || d.Map == Map.Internal)
+                return;
+
+            if (d.Combatant != null)
+                return; // fighting — let the combat AI drive
+
+            double dsq = d.RoamTarget == Point3D.Zero
+                ? -1.0 : d.GetDistanceToSqrt(d.RoamTarget);
+
+            // Need a fresh hop: none yet, arrived, or a stale far target (teleport,
+            // roamed in from elsewhere). Pin Home and let native seeking start it.
+            if (d.RoamTarget == Point3D.Zero || dsq <= 1.0 || dsq > 25.0)
+            {
+                Point3D t = PickDenizenRoamTarget(d);
+                if (t == Point3D.Zero)
+                    return;
+
+                d.RoamTarget = t;
+                d.Home = t;
+                d.RangeHome = 1;
+                d.LastRoamPos = d.Location;
+                d.RoamProgressUtc = now;
+                return;
+            }
+
+            // In transit — native seeking is walking it. Watch for a wedge and,
+            // if it hasn't moved for a beat, route around with one A* step.
+            if (d.Location != d.LastRoamPos)
+            {
+                d.LastRoamPos = d.Location;
+                d.RoamProgressUtc = now;
+            }
+            else if ((now - d.RoamProgressUtc) >= TimeSpan.FromSeconds(1.0) && d.AIObject != null)
+            {
+                d.AIObject.MoveTo(d.RoamTarget, false, 1);
+            }
+        }
+
+        // A standable point a SHORT hop (4-9 tiles) from the denizen — short enough
+        // that it is almost always directly reachable, so native seeking carries the
+        // denizen there briskly without stalling. Kept within the town bounds.
+        private static Point3D PickDenizenRoamTarget(LLMDenizen d)
+        {
+            Map map = d.Map;
+
+            Point3D center = Point3D.Zero;
+            bool inTown = !string.IsNullOrEmpty(d.HomeCity) &&
+                          BritanniaGeography.TryGetCityCenter(d.HomeCity, out center);
+
+            for (int i = 0; i < 10; i++)
+            {
+                double ang = Utility.RandomDouble() * Math.PI * 2.0;
+                int step = Utility.RandomMinMax(4, 9);
+
+                int x = d.X + (int)Math.Round(Math.Cos(ang) * step);
+                int y = d.Y + (int)Math.Round(Math.Sin(ang) * step);
+
+                if (inTown)
+                {
+                    int dx = x - center.X;
+                    int dy = y - center.Y;
+                    if (dx * dx + dy * dy > 110 * 110)
+                        continue;
+                }
+
+                int z = map.GetAverageZ(x, y);
+                if (map.CanSpawnMobile(x, y, z))
+                    return new Point3D(x, y, z);
+            }
+
+            return Point3D.Zero;
         }
 
         private static void MaybeStart(BaseCreature npc, Errand e, DateTime now)

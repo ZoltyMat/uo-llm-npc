@@ -35,6 +35,7 @@ namespace Server.Custom.LLMNpc
             CommandSystem.Register("FavorTest", AccessLevel.GameMaster, new CommandEventHandler(FavorTest_OnCommand));
             CommandSystem.Register("FavorDeliver", AccessLevel.GameMaster, new CommandEventHandler(FavorDeliver_OnCommand));
             CommandSystem.Register("DenizenStatus", AccessLevel.GameMaster, new CommandEventHandler(DenizenStatus_OnCommand));
+            CommandSystem.Register("DenizenReset", AccessLevel.GameMaster, new CommandEventHandler(DenizenReset_OnCommand));
         }
 
         [Usage("DenizenStatus")]
@@ -44,6 +45,14 @@ namespace Server.Custom.LLMNpc
             List<string> lines = DenizenDirector.StatusLines();
             for (int i = 0; i < lines.Count; i++)
                 e.Mobile.SendMessage(i == 0 ? 0x40 : 0x35, lines[i]);
+        }
+
+        [Usage("DenizenReset")]
+        [Description("Deletes ALL denizens so the director repopulates them fresh — use after a build that changes denizen stats/kit (P17 arming, density).")]
+        public static void DenizenReset_OnCommand(CommandEventArgs e)
+        {
+            int n = DenizenDirector.ResetAll();
+            e.Mobile.SendMessage(0x40, "Removed {0} denizens. The director will repopulate to the configured target over the next few minutes.", n);
         }
 
         [Usage("FavorTest")]
